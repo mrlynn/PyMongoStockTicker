@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 ##
 # A Python application demonstrating MongoDB's Change Streams capability, by
-# simulating a simple "Stock Prices" system Changes to stock prices are
+# simulating a simple "Stock Prices" system. Changes to stock prices are
 # listened for and displayed to the user, as and when these price changes are
 # persisted in the MongoDB database.
 #
@@ -12,7 +12,7 @@
 # Commands:
 # - CLEAN   - Clean out old version of DB & Collection (if exists)
 # - INIT    - Initialise DB Collection with ~20k symbols & random prices
-# - CHANGE  - Continuously perform random changes to records DB Collection*
+# - CHANGE  - Continuously perform random changes to records in DB Collection*
 # - TRACE   - Continuously listen for DB Collection changes & print them*
 # - DISPLAY - Continuously listen for DB Collection changes & display each
 #             price change in the console, next to its respective stock symbol*
@@ -23,12 +23,12 @@
 #
 # Prerequisites:
 #
-# 1) Configure and run one of the following:
+# 1) Configure and run one of following using MongoDB version 3.6+:
 # * MongoDB Replica Set (e.g. https://github.com/pkdone/mongo-quick-repset)
 #  or
 # * Sharded Cluster (e.g. https://github.com/pkdone/mongo-multi-svr-generator)
 #
-# 2) Install PyMongo driver, eg:
+# 2) Install PyMongo driver (version 3.6+), eg:
 #   $ sudo pip install pymongo
 #
 # 3) Change the value of the MONGODB_URL variable, below, to reflect cluster
@@ -39,6 +39,7 @@ import sys
 import random
 import time
 import curses
+from pprint import pprint
 from curses import wrapper
 from datetime import datetime
 from pymongo import MongoClient
@@ -52,6 +53,7 @@ from pymongo import MongoClient
 # Connecting to Replica Set example:
 MONGODB_URL = 'mongodb://localhost:27000,localhost:27001,localhost:27002/?' \
               'replicaSet=TestRS'
+mongo_client = MongoClient(MONGODB_URL)
 
 
 ####
@@ -79,10 +81,10 @@ def do_init(*args):
         return
 
     enable_collection_sharding_if_required()
-    print('-- Initialising collection "%s.%s" with stock price values (this\n'
-          '   will take a few minutes)\n' % (DB, COLL))
+    print('-- Initialising collection "%s.%s" with stock price values\n'
+          % (DB, COLL))
 
-    for i in xrange(10000, 15000):
+    for i in range(10000, 15000):
         price = random.randrange(10, 20)
         stocks_coll().insert({'_id': 'A%d' % i, 'price': price})
         stocks_coll().insert({'_id': 'K%d' % i, 'price': price})
@@ -105,7 +107,7 @@ def do_init(*args):
 def do_clean(*args):
     print('-- Dropping collection "%s.%s" and all its documents\n'
           % (DB, COLL))
-    MongoClient(MONGODB_URL).drop_database(DB)
+    mongo_client.drop_database(DB)
 
 
 ####
@@ -125,7 +127,7 @@ def do_change(*args):
 
     try:
         while True:
-            key = random.choice(SYMBOLS.keys())
+            key = random.choice(list(SYMBOLS.keys()))
             # Update random important stock symbol's price
             stocks_coll().update_one({'_id': key},
                                      {'$set': {'price': rand_stock_val(key)}})
@@ -162,7 +164,7 @@ def do_trace(*args):
 
     try:
         for doc in cursor:
-            print('Stock %s \ttick: %d \t time:%s' % (
+            print('Stock %s \ttick: %d \t time: %s' % (
                   doc['documentKey']['_id'],
                   doc['updateDescription']['updatedFields']['price'],
                   str(datetime.now().strftime('%H:%M:%S.%f')[:-2])))
@@ -192,7 +194,7 @@ def do_display(*args):
 ####
 def show_console_ui(stdscr):
     init_console_ui(stdscr)
-    symbols_list = SYMBOLS.keys()
+    symbols_list = list(SYMBOLS.keys())
     now = datetime.now()
     last_updated_tracker = {}
     (last_price_tracker, resume_token) = get_init_stck_vals_plus_resume_tkn()
@@ -207,7 +209,7 @@ def show_console_ui(stdscr):
                       str(last_price_tracker[symbol]))
 
     stdscr.addstr(len(symbols_list)+1, 0, '(press "Ctrl-C" to quit)')
-    refresh_console_ui(stdscr, symbols_list)
+    refresh_console_ui(stdscr, len(symbols_list)+2)
     cursor = stocks_coll().watch(get_stock_watch_filter(),
                                  resume_after=resume_token)
 
@@ -227,7 +229,7 @@ def show_console_ui(stdscr):
                 stdscr.addstr(symbols_list.index(symbol), 8,
                               str(last_price_tracker[symbol]))
 
-        refresh_console_ui(stdscr, symbols_list)
+        refresh_console_ui(stdscr, len(symbols_list)+2)
 
 
 ####
@@ -262,8 +264,8 @@ def init_console_ui(stdscr):
 ####
 # Show any display changes that have occurred, in the UI
 ####
-def refresh_console_ui(stdscr, symbols_list):
-    stdscr.addstr(len(symbols_list)+2, 0, '')
+def refresh_console_ui(stdscr, cursor_row_pos):
+    stdscr.addstr(cursor_row_pos, 0, '')
     stdscr.refresh()
 
 
@@ -271,15 +273,15 @@ def refresh_console_ui(stdscr, symbols_list):
 # Get handle on database.collection
 ####
 def stocks_coll():
-    return MongoClient(MONGODB_URL)[DB][COLL]
+    return mongo_client[DB][COLL]
 
 
 ####
-# If the target cluster is sharded ensure, shard the database.collection on
-# just the '_id' field (not usually recommended but for demos this is fine)
+# If the target cluster is sharded, shard the database.collection on just the
+# '_id' field (not usually recommended but for demos this is fine)
 ####
 def enable_collection_sharding_if_required():
-    admin_db = MongoClient(MONGODB_URL).admin
+    admin_db = mongo_client.admin
 
     if admin_db.command('serverStatus')['process'] == 'mongos':
         admin_db.command('enableSharding', DB)
@@ -321,7 +323,7 @@ def print_usage():
     for key in COMMANDS.keys():
         print(' * %s' % key)
 
-    print
+    print(' ')
 
 
 ####
@@ -337,7 +339,7 @@ def print_commands_error(command):
 # and instead just print a simple single line message
 ####
 def keyboard_shutdown():
-    print('\Interrupted\n')
+    print('Interrupted\n')
 
     try:
         sys.exit(0)
@@ -365,9 +367,9 @@ SYMBOLS = {
 }
 COMMANDS = {
     'INIT':    do_init,
-    'TRACE':  do_trace,
+    'TRACE':   do_trace,
     'DISPLAY': do_display,
-    'CHANGE': do_change,
+    'CHANGE':  do_change,
     'CLEAN':   do_clean,
 }
 
